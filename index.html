@@ -470,14 +470,14 @@
                 gridWrapper.innerHTML = gridHtml;
                 document.body.appendChild(gridWrapper);
                 const gridCanvas = await html2canvas(gridWrapper, { 
-                    scale: 4, 
+                    scale: 2.5, // ลดจาก 4 เป็น 2.5 เพื่อแก้ปัญหาตัวหนังสือคมเกินไปจนแตกบน iOS
                     useCORS: true, 
                     backgroundColor: null, 
                     logging: false,
                     onclone: (clonedDoc) => {
                         // ฝัง CSS ฟอนต์ลงไปอีกรอบตอนแคป เพื่อการันตีว่า iOS จะดึงฟอนต์ Prompt มาใช้
                         const style = clonedDoc.createElement('style');
-                        style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800;900&display=swap'); * { font-family: 'Prompt', sans-serif !important; }`;
+                        style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800;900&display=swap'); * { font-family: 'Prompt', sans-serif !important; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }`;
                         clonedDoc.head.appendChild(style);
                     }
                 }); 
@@ -492,13 +492,13 @@
                 document.body.appendChild(mapWrapper);
 
                 const mapCanvas = await html2canvas(mapWrapper, { 
-                    scale: 4, 
+                    scale: 2.5, // ลดจาก 4 เป็น 2.5 เพื่อแก้ปัญหาตัวหนังสือคมเกินไปจนแตกบน iOS
                     useCORS: true, 
                     backgroundColor: null, 
                     logging: false,
                     onclone: (clonedDoc) => {
                         const style = clonedDoc.createElement('style');
-                        style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800;900&display=swap'); * { font-family: 'Prompt', sans-serif !important; }`;
+                        style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800;900&display=swap'); * { font-family: 'Prompt', sans-serif !important; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }`;
                         clonedDoc.head.appendChild(style);
                     }
                 }); 
