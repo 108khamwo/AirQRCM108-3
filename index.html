@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ระบบรายงานค่าฝุ่น 17 จังหวัดภาคเหนือ</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- html2canvas สำหรับ Export รูปภาพ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- D3.js & TopoJSON สำหรับวาดแผนที่ -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/topojson-client@3"></script>
+    <!-- Google Fonts: ใช้ Sarabun สำหรับหน้าเว็บ และ Prompt สำหรับรูปภาพ -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800;900&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { 
+            font-family: 'Sarabun', sans-serif; 
+            background-color: #f1f5f9; 
+            -webkit-tap-highlight-color: transparent; 
+        }
+
+        /* บังคับใช้ Prompt เฉพาะส่วนที่จะส่งออกเป็นรูปภาพ */
+        .export-prompt-font, .export-prompt-font * {
+            font-family: 'Prompt', sans-serif !important;
+        }
+
+        .map-poly {
+            stroke-width: 1.5;
+            stroke-linejoin: round;
+            stroke-linecap: round;
+            transition: fill 0.3s ease, filter 0.2s;
+            cursor: pointer;
+        }
+        .map-poly:hover {
+            filter: brightness(1.08) drop-shadow(0px 4px 6px rgba(0,0,0,0.15));
+        }
+
+        .loading-spinner {
+            border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top: 2px solid #ffffff;
+            width: 14px; height: 14px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* ซ่อนฟอนต์พรีโหลดเพื่อแก้ปัญหา iOS ไม่ยอมเรนเดอร์ฟอนต์ตอนแคปภาพ */
+        .preload-font { position: absolute; left: -9999px; visibility: hidden; font-family: 'Prompt'; }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+
+    <!-- Preload Fonts -->
+    <div class="preload-font font-normal">P</div>
+    <div class="preload-font font-medium">P</div>
+    <div class="preload-font font-semibold">P</div>
+    <div class="preload-font font-bold">P</div>
+    <div class="preload-font font-extrabold">P</div>
+    <div class="preload-font font-black">P</div>
+
+    <div class="max-w-6xl mx-auto flex flex-col gap-5 md:gap-6">
+
+        <!-- 1. Header -->
+        <div class="order-1 bg-white p-5 md:p-6 rounded-[24px] md:rounded-3xl shadow-sm border-l-[12px] md:border-l-[16px] border-[#ef4444] flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div class="w-full md:flex-1">
+                <h1 class="text-xl md:text-4xl font-[900] text-slate-900 leading-snug tracking-tighter uppercase">สถานการณ์ฝุ่น ภาคเหนือ</h1>
+                <p class="text-slate-500 font-bold mt-1 uppercase tracking-widest text-[10px] md:text-xs">อ้างอิงค่าสูงสุด 17 จังหวัด (Air4Thai)</p>
+            </div>
+            
+            <div class="w-full md:w-auto flex flex-col items-start md:items-end gap-3 md:gap-2">
+                <button id="btnFetchData" onclick="fetchAir4ThaiData()" class="bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 px-5 rounded-xl shadow-md transition flex items-center gap-2 text-xs active:scale-95">
+                    <svg id="fetchIcon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                    <div id="fetchSpinner" class="loading-spinner hidden"></div>
+                    <span id="fetchText">อัปเดตข้อมูลล่าสุด</span>
+                </button>
+                <div id="timeDisplay" class="hidden text-left md:text-right bg-slate-50 px-4 py-2 md:py-1 rounded-lg border border-slate-100 w-full md:w-auto mt-1 md:mt-0">
+                    <p class="text-[9px] font-black text-slate-400 uppercase tracking-widest">ข้อมูล ณ เวลา</p>
+                    <p id="timeValue" class="text-xs md:text-sm font-black text-slate-700"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. Mobile Quick Actions -->
+        <div id="mobileActionSection" class="hidden md:hidden flex-col gap-3 order-2">
+            <button onclick="saveMapWithTemplate(this)" class="w-full bg-[#ef4444] hover:bg-red-600 text-white py-4 px-4 rounded-[20px] text-[15px] font-black shadow-lg transition-all flex items-center justify-center gap-2 active:scale-95 border border-red-500">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                <span>บันทึกรูปลงกรอบ 17 จังหวัด</span>
+            </button>
+        </div>
+
+        <!-- 3. Text Report Area -->
+        <div id="textReportSection" class="hidden order-3 md:order-5 bg-white rounded-[24px] shadow-sm border border-slate-200 p-5 md:p-6 mt-0">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-black text-slate-800 text-sm">คัดลอกข้อความสรุป</h3>
+                <button onclick="copyReportText()" class="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 px-4 py-2 rounded-xl text-[11px] md:text-xs font-bold transition-colors active:scale-95">
+                    <span id="copyStatus">คัดลอกข้อความ</span>
+                </button>
+            </div>
+            <div id="reportText" class="bg-slate-50 rounded-xl p-4 border border-slate-100 text-xs font-bold text-slate-600 leading-relaxed whitespace-pre-wrap max-h-[220px] md:max-h-none overflow-y-auto"></div>
+        </div>
+
+        <!-- 4. Settings Section -->
+        <div id="settingsSection" class="hidden order-4 md:order-2 bg-white p-5 md:p-6 rounded-[24px] shadow-sm border border-slate-200 mt-0">
+            <h3 class="text-sm font-black text-slate-800 mb-3">1. ตั้งค่ากรอบรูปภาพ (Template)</h3>
+            <div class="flex flex-col sm:flex-row items-start sm:items-center gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                <input type="file" id="bgImageInput" accept="image/*" class="w-full sm:w-auto text-xs text-slate-600 bg-transparent border-0 p-0 cursor-pointer file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#ef4444] file:text-white outline-none hover:file:bg-red-700 transition">
+                <p class="text-[10px] text-slate-500 font-medium">** ค่าเริ่มต้นใช้กรอบ 17 จว. มาตรฐานแล้ว</p>
+            </div>
+            <img id="template-preview-img" style="display: none;" class="mt-4 max-w-[150px] rounded-lg shadow-sm border border-slate-200" />
+        </div>
+
+        <!-- 5. Main Display Section (Map & Grid) -->
+        <div id="mainContentSection" class="hidden order-5 md:order-4 grid grid-cols-1 lg:grid-cols-2 gap-6 mt-0">
+            
+            <!-- Map Section -->
+            <div class="bg-white rounded-[24px] shadow-sm border border-slate-200 p-5 flex flex-col relative overflow-hidden">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
+                    <div>
+                        <h2 class="text-lg md:text-xl font-black text-slate-800">แผนที่ PM2.5 (17 จังหวัด)</h2>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                        <button onclick="saveMapWithTemplate(this)" class="hidden md:flex bg-[#ef4444] hover:bg-red-600 text-white px-4 py-2.5 rounded-xl text-[11px] md:text-xs font-bold shadow-md transition-colors items-center justify-center gap-2 active:scale-95">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                            <span>บันทึกรูปลงกรอบ</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex justify-center items-center bg-slate-50 rounded-2xl border border-slate-100 p-2 md:p-4">
+                    <div id="export-map-container" class="w-full max-w-[450px] relative">
+                        <!-- สร้าง Wrapper คลุมทั้งแผนที่และข้อความให้อยู่ด้วยกัน -->
+                        <div id="export-map-wrapper" class="w-full relative export-prompt-font">
+                            <svg viewBox="0 0 550 680" id="northMapSvg" class="w-full h-auto drop-shadow-md"></svg>
+                            <!-- เพิ่ม Overlay สำหรับวางตัวหนังสือด้วย HTML (แก้ปัญหาฟอนต์เพี้ยนบนมือถือ iOS 100%) -->
+                            <div id="mapLabelsOverlay" class="absolute top-0 left-0 w-full h-full pointer-events-none"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grid Ranking Section -->
+            <div class="bg-white rounded-[24px] shadow-sm border border-slate-200 p-5 flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg md:text-xl font-black text-slate-800">จัดอันดับ 17 จังหวัด</h2>
+                </div>
+                <div id="export-grid-container" class="w-full h-auto relative">
+                    <div id="ranking-grid-container" class="grid grid-cols-3 gap-2 md:gap-3"></div>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <script>
+        const NORTHERN_17 = [
+            'แม่ฮ่องสอน', 'เชียงใหม่', 'เชียงราย', 'ลำพูน', 'น่าน', 'พะเยา', 
+            'ลำปาง', 'แพร่', 'พิษณุโลก', 'ตาก', 'กำแพงเพชร', 'อุตรดิตถ์', 
+            'นครสวรรค์', 'พิจิตร', 'อุทัยธานี', 'เพชรบูรณ์', 'สุโขทัย'
+        ];
+
+        const PROVINCE_NAME_MAP = {
+            'Mae Hong Son': 'แม่ฮ่องสอน', 'Chiang Mai': 'เชียงใหม่', 'Chiang Rai': 'เชียงราย',
+            'Lamphun': 'ลำพูน', 'Nan': 'น่าน', 'Phayao': 'พะเยา', 'Lampang': 'ลำปาง',
+            'Phrae': 'แพร่', 'Phitsanulok': 'พิษณุโลก', 'Tak': 'ตาก', 'Kamphaeng Phet': 'กำแพงเพชร',
+            'Uttaradit': 'อุตรดิตถ์', 'Nakhon Sawan': 'นครสวรรค์', 'Phichit': 'พิจิตร',
+            'Uthai Thani': 'อุทัยธานี', 'Phetchabun': 'เพชรบูรณ์', 'Sukhothai': 'สุโขทัย'
+        };
+
+        const DEFAULT_TEMPLATE_URL = "https://img1.pic.in.th/images/--17--_Resized.jpg";
+        
+        let currentData = [];
+        let geoFeatures = [];
+        let isMapLoading = true;
+        let shortDateForTemplate = "";
+        let shortTimeForTemplate = "";
+        let fullDateTimeStr = "";
+
+        window.onload = function() {
+            fetchGeoMap();
+            fetchAir4ThaiData(); 
+            setupTemplateInput();
+        };
+
+        function setupTemplateInput() {
+            document.getElementById('bgImageInput').addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(event) {
+                        const previewImg = document.getElementById('template-preview-img');
+                        previewImg.src = event.target.result;
+                        previewImg.style.display = 'block';
+                    }
+                    reader.readAsDataURL(file);
+                }
+            });
+        }
+
+        async function fetchGeoMap() {
+            try {
+                const response = await fetch('https://raw.githubusercontent.com/apisit/thailand.json/master/thailand.json');
+                const topoData = await response.json();
+                let geojson = topoData.type === 'Topology' ? topojson.feature(topoData, topoData.objects[Object.keys(topoData.objects)[0]]) : topoData;
+                geoFeatures = geojson.features.filter(f => PROVINCE_NAME_MAP[f.properties.NAME_1 || f.properties.name || f.properties.pro_en || f.properties.NAME]);
+                isMapLoading = false;
+                if (currentData.length > 0) renderVectorMap();
+            } catch (err) { console.error("Error loading map", err); isMapLoading = false; }
+        }
+
+        function getFullThaiDateString(rawDateStr, rawTimeStr) {
+            const thaiMonthsShort = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+            const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+            
+            try {
+                const parts = rawDateStr.split('-');
+                if(parts.length === 3) {
+                    let y = parseInt(parts[0]);
+                    let m = parseInt(parts[1]) - 1;
+                    let d = parseInt(parts[2]);
+                    
+                    let thaiYear = y + 543;
+                    shortDateForTemplate = `${d} ${thaiMonthsShort[m]} ${thaiYear.toString().slice(-2)}`;
+                    shortTimeForTemplate = `${rawTimeStr.replace(':', '.')} น.`;
+                    
+                    return `${d} ${thaiMonths[m]} ${thaiYear} เวลา ${rawTimeStr} น.`;
+                }
+            } catch(e){}
+            
+            shortDateForTemplate = "ล่าสุด";
+            shortTimeForTemplate = "";
+            return `${rawDateStr} ${rawTimeStr}`;
+        }
+
+        async function fetchAir4ThaiData() {
+            const btn = document.getElementById('btnFetchData');
+            const icon = document.getElementById('fetchIcon');
+            const spinner = document.getElementById('fetchSpinner');
+            const text = document.getElementById('fetchText');
+
+            if(btn) btn.disabled = true;
+            if(icon) icon.classList.add('hidden');
+            if(spinner) spinner.classList.remove('hidden');
+            if(text) text.innerText = 'กำลังโหลดข้อมูล...';
+
+            try {
+                const targetUrl = `http://air4thai.pcd.go.th/services/getNewAQI_JSON.php?v=${Date.now()}`;
+                const proxies = [
+                    { url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`, type: 'raw' },
+                    { url: `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`, type: 'raw' }
+                ];
+                
+                let json = null;
+                for (let p of proxies) {
+                    try {
+                        const res = await fetch(p.url, { cache: 'no-store' });
+                        if (res.ok) { json = await res.json(); break; }
+                    } catch(e){}
+                }
+
+                if (!json || !json.stations) throw new Error('ไม่สามารถดึงข้อมูลจาก Air4Thai ได้');
+
+                if (json.stations[0] && json.stations[0].AQILast) {
+                    fullDateTimeStr = getFullThaiDateString(json.stations[0].AQILast.date, json.stations[0].AQILast.time);
+                    document.getElementById('timeValue').innerText = fullDateTimeStr;
+                }
+
+                const provMap = {};
+                json.stations.forEach(st => {
+                    const prov = NORTHERN_17.find(p => st.areaTH.includes(p));
+                    if (prov) {
+                        const pm25 = st.AQILast?.PM25?.value !== "-" ? parseFloat(st.AQILast.PM25.value) : -1;
+                        if (!provMap[prov]) provMap[prov] = [];
+                        provMap[prov].push({ ...st, pm25Num: pm25 });
+                    }
+                });
+
+                currentData = NORTHERN_17.map(prov => {
+                    if (!provMap[prov] || provMap[prov].length === 0) return { name: prov, val: 0, amphoe: '' };
+                    const maxStation = provMap[prov].reduce((max, s) => s.pm25Num > max.pm25Num ? s : max, provMap[prov][0]);
+                    const match = maxStation.areaTH.match(/(อ\.|อำเภอ)\s*([ก-๙a-zA-Z0-9]+)/);
+                    let amphoe = match ? match[0] : '';
+                    if(!amphoe && maxStation.areaTH.includes('เมือง')) amphoe = 'อ.เมือง';
+                    return { 
+                        name: prov, 
+                        val: maxStation.pm25Num, 
+                        amphoe: amphoe.replace('อำเภอ', 'อ.'),
+                        nameTH: maxStation.nameTH,
+                        areaTH: maxStation.areaTH
+                    };
+                }).sort((a, b) => b.val - a.val);
+
+                document.getElementById('timeDisplay').classList.remove('hidden');
+                document.getElementById('settingsSection').classList.remove('hidden');
+                document.getElementById('mainContentSection').classList.remove('hidden');
+                document.getElementById('textReportSection').classList.remove('hidden');
+                
+                const mobileAction = document.getElementById('mobileActionSection');
+                if(mobileAction) { mobileAction.classList.remove('hidden'); mobileAction.classList.add('flex'); }
+
+                renderVectorMap();
+                renderGrid();
+                generateTextReport();
+
+                if(text) text.innerText = 'อัปเดตสำเร็จ';
+                setTimeout(() => { if(text) text.innerText = 'อัปเดตข้อมูลล่าสุด'; }, 2000);
+
+            } catch (err) {
+                console.error("Fetch Failed:", err);
+                if(text) text.innerText = 'โหลดล้มเหลว ลองใหม่';
+                alert(err.message);
+            } finally {
+                if(btn) btn.disabled = false;
+                if(icon) icon.classList.remove('hidden');
+                if(spinner) spinner.classList.add('hidden');
+            }
+        }
+
+        function getAqiColor(val) {
+            if (val > 75) return { bg: '#FF0000', txt: '#ffffff', out: 'rgba(0,0,0,0.5)' };
+            if (val > 37.5) return { bg: '#FF9900', txt: '#ffffff', out: 'rgba(0,0,0,0.5)' };
+            if (val > 25) return { bg: '#FFFF00', txt: '#111827', out: 'rgba(255,255,255,0.7)' };
+            if (val > 15) return { bg: '#92D050', txt: '#ffffff', out: 'rgba(0,0,0,0.5)' };
+            if (val >= 0) return { bg: '#00B0F0', txt: '#ffffff', out: 'rgba(0,0,0,0.5)' };
+            return { bg: '#e5e7eb', txt: '#374151', out: 'rgba(255,255,255,0.8)' };
+        }
+
+        function renderVectorMap() {
+            if (isMapLoading || currentData.length === 0) return;
+            const svg = d3.select("#northMapSvg");
+            svg.selectAll("*").remove();
+
+            // ล้างข้อมูล overlay ตัวหนังสือ
+            let overlay = document.getElementById("mapLabelsOverlay");
+            if (overlay) overlay.innerHTML = "";
+            
+            const projection = d3.geoMercator().fitSize([550, 680], { type: "FeatureCollection", features: geoFeatures });
+            const pathGen = d3.geoPath().projection(projection);
+            const gPoly = svg.append("g");
+            
+            geoFeatures.forEach(f => {
+                const name = PROVINCE_NAME_MAP[f.properties.NAME_1 || f.properties.name || f.properties.pro_en || f.properties.NAME];
+                const st = currentData.find(d => d.name === name);
+                const val = st ? st.val : 0;
+                const amphoe = st ? st.amphoe : '';
+                const c = getAqiColor(val);
+                
+                gPoly.append("path").attr("d", pathGen(f)).attr("fill", c.bg).attr("stroke", "#ffffff").attr("class", "map-poly");
+                
+                let [cx, cy] = pathGen.centroid(f);
+                // ขยับเลเบลเพื่อไม่ให้ทับกัน 
+                if (name === 'เชียงใหม่') { cx += 25; cy -= 15; }
+                if (name === 'แม่ฮ่องสอน') { cx -= 5; cy += 15; }
+                if (name === 'ตาก') { cx += 5; cy -= 10; }
+                if (name === 'ลำพูน') { cx -= 5; cy += 10; }
+                if (name === 'ลำปาง') { cx += 5; cy -= 5; }
+                if (name === 'อุตรดิตถ์') { cx += 10; }
+                if (name === 'สุโขทัย') { cy -= 10; }
+                if (name === 'เพชรบูรณ์') { cx -= 10; }
+                if (name === 'แพร่') { cx += 10; }
+
+                const shadow = `1px 1px 2px ${c.out}, -1px -1px 2px ${c.out}, 1px -1px 2px ${c.out}, -1px 1px 2px ${c.out}`;
+
+                // นำตัวหนังสือมาสร้างด้วย HTML <div> วางทับแผนที่ SVG แทน เพื่อให้ระบบดึงฟอนต์ Prompt ได้สมบูรณ์บน Safari/iOS
+                if (overlay) {
+                    const leftPct = (cx / 550) * 100;
+                    const topPct = (cy / 680) * 100;
+                    const valSize = val > 0 ? 24 : 14;
+                    
+                    const labelHtml = `
+                    <div class="absolute flex flex-col items-center justify-center transform -translate-x-1/2 -translate-y-1/2" 
+                         style="left: ${leftPct}%; top: ${topPct}%; color: ${c.txt}; text-shadow: ${shadow}; font-family: 'Prompt', sans-serif;">
+                        <span style="font-size: 14px; font-weight: 700; line-height: 1; margin-bottom: 2px;">${name}</span>
+                        <span style="font-size: ${valSize}px; font-weight: 800; line-height: 1;">${val > 0 ? val : "-"}</span>
+                        ${amphoe ? `<span style="font-size: 10px; font-weight: 400; margin-top: 2px;">*${amphoe}</span>` : ''}
+                    </div>`;
+                    overlay.innerHTML += labelHtml;
+                }
+            });
+        }
+
+        function renderGrid() {
+            const container = document.getElementById('ranking-grid-container');
+            container.innerHTML = currentData.map((item, index) => {
+                const c = getAqiColor(item.val);
+                // เปลี่ยน aspect-[1/1.18] เป็น aspect-square (1:1)
+                return `
+                <div class="relative rounded-[16px] shadow-sm flex flex-col items-center justify-center border-2 export-prompt-font w-full aspect-square" 
+                     style="background-color: ${c.bg}; color: ${c.txt}; border-color: ${c.bg}; container-type: inline-size; overflow: hidden;">
+                    <div class="flex flex-col items-center w-full transition-transform" style="transform: translateY(-4%);">
+                        <span class="font-bold leading-none opacity-95 mb-1" style="font-size: 13cqi;">#${index + 1}</span>
+                        <span class="font-bold leading-none tracking-wide" style="font-size: 16cqi;">${item.name}</span>
+                        <span class="font-black leading-none tracking-tighter" style="font-size: 38cqi; margin-top: 3%; margin-bottom: 2%;">${item.val > 0 ? item.val : '-'}</span>
+                        <span class="font-bold leading-none opacity-90" style="font-size: 10cqi;">µg/m³</span>
+                    </div>
+                    ${item.amphoe ? `<span class="absolute text-center font-medium opacity-85 leading-none" style="font-size: 6.5cqi; bottom: 6%; width: 100%;">*${item.amphoe}</span>` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        function generateTextReport() {
+            let text = `สถานการณ์ฝุ่น PM2.5 พื้นที่ “ภาคเหนือ” (17 จังหวัด) วันที่ ${shortDateForTemplate} ${shortTimeForTemplate}\n.\n`;
+            currentData.forEach((item, index) => {
+                const tambonStr = item.areaTH ? item.areaTH.split(' ').find(p => p.startsWith('ต.')) || '' : '';
+                let locStr = item.nameTH || '';
+                if (tambonStr && !locStr.includes(tambonStr)) locStr += ' ' + tambonStr;
+                if (item.amphoe && !locStr.includes(item.amphoe)) locStr += ' ' + item.amphoe;
+
+                text += `- อันดับ ${index + 1} จ.${item.name} | PM2.5 : ${item.val > 0 ? item.val : '-'} µg/m³\nจุดตรวจวัด : ${locStr}\n`;
+            });
+            text += `.\nข้อมูลอ้างอิง : Air4Thai กรมควบคุมมลพิษ\n*อ้างอิงจากสถานีที่มีค่าสูงที่สุดของแต่ละจังหวัด`;
+            document.getElementById('reportText').innerText = text;
+        }
+
+        function copyReportText() {
+            const t = document.getElementById('reportText').innerText;
+            const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select();
+            document.execCommand('copy'); document.body.removeChild(ta);
+            document.getElementById('copyStatus').innerText = 'คัดลอกสำเร็จ!';
+            setTimeout(() => { document.getElementById('copyStatus').innerText = 'คัดลอกข้อความ'; }, 2000);
+        }
+
+        // =========================================================================
+        // เทคนิคประกอบร่างภาพขั้นสูง (Off-screen Canvas Composition) เพื่อความคมชัด 100%
+        // =========================================================================
+        async function saveMapWithTemplate(btnElement) {
+            if (!currentData || currentData.length === 0) { alert("กรุณารอโหลดข้อมูลให้เสร็จก่อนครับ"); return; }
+            
+            const originalText = btnElement.innerHTML;
+            btnElement.innerHTML = `<span class="loading-spinner"></span><span class="ml-2 font-bold" style="font-family: Sarabun;">กำลังประมวลผล...</span>`;
+            btnElement.disabled = true;
+
+            try {
+                // บังคับโหลดฟอนต์ตามน้ำหนักที่ใช้ทั้งหมด เพื่อแก้ปัญหา iOS Safari
+                try {
+                    await document.fonts.load('600 14px "Prompt"');
+                    await document.fonts.load('700 26px "Prompt"');
+                    await document.fonts.load('800 28px "Prompt"');
+                    await document.fonts.load('900 58px "Prompt"');
+                    await document.fonts.ready;
+                } catch (e) { console.warn("Font load issue:", e); }
+                await new Promise(r => setTimeout(r, 200));
+
+                // 1. สร้าง Canvas จำลองสำหรับ "ตารางฝั่งขวา"
+                const gridWrapper = document.createElement('div');
+                gridWrapper.style.position = 'absolute';
+                gridWrapper.style.left = '-9999px';
+                gridWrapper.style.width = '520px';
+                gridWrapper.style.fontFamily = "'Prompt', sans-serif";
+                
+                let gridHtml = `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 520px; box-sizing: border-box;">`;
+                currentData.forEach((item, index) => {
+                    const c = getAqiColor(item.val);
+                    const drop = c.bg === '#FFFF00' ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.6)';
+                    const ts = `1px 1px 2px ${drop}`; // เงาตายตัวป้องกันการเหลื่อม
+                    
+                    // ปรับ height เป็น 166px เพื่อให้เป็น 1:1 (กว้าง 166 x ยาว 166)
+                    gridHtml += `
+                    <div style="background-color: ${c.bg}; color: ${c.txt}; border-radius: 12px; position: relative; width: 166px; height: 166px; box-sizing: border-box; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+                        <div style="display: flex; flex-direction: column; align-items: center; width: 100%; text-align: center; transform: translateY(-4px);">
+                            <div style="font-size: 21px; font-weight: 700; opacity: 0.95; text-shadow: ${ts}; line-height: 1; margin-bottom: 5px;">#${index + 1}</div>
+                            <div style="font-size: 26px; font-weight: 700; text-shadow: ${ts}; line-height: 1; margin-bottom: 5px;">${item.name}</div>
+                            <div style="font-size: 58px; font-weight: 900; text-shadow: ${ts}; line-height: 1; letter-spacing: -1px; transform: translateY(-20px); margin: 8px 0;">${item.val > 0 ? item.val : '-'}</div>
+                            <div style="font-size: 16px; font-weight: 700; opacity: 0.9; text-shadow: ${ts}; line-height: 1; transform: translateY(-10px);">µg/m³</div>
+                        </div>
+                    </div>`;
+                });
+                gridHtml += `</div>`;
+                gridWrapper.innerHTML = gridHtml;
+                document.body.appendChild(gridWrapper);
+                const gridCanvas = await html2canvas(gridWrapper, { 
+                    scale: 4, 
+                    useCORS: true, 
+                    backgroundColor: null, 
+                    logging: false,
+                    onclone: (clonedDoc) => {
+                        // ฝัง CSS ฟอนต์ลงไปอีกรอบตอนแคป เพื่อการันตีว่า iOS จะดึงฟอนต์ Prompt มาใช้
+                        const style = clonedDoc.createElement('style');
+                        style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800;900&display=swap'); * { font-family: 'Prompt', sans-serif !important; }`;
+                        clonedDoc.head.appendChild(style);
+                    }
+                }); 
+                document.body.removeChild(gridWrapper);
+
+                // 2. สร้าง Canvas จำลองสำหรับ "แผนที่ฝั่งซ้าย" (โคลนพร้อม Overlay)
+                const mapWrapper = document.getElementById('export-map-wrapper').cloneNode(true);
+                mapWrapper.style.position = 'absolute';
+                mapWrapper.style.left = '-9999px';
+                mapWrapper.style.width = '540px';
+                mapWrapper.style.fontFamily = "'Prompt', sans-serif";
+                document.body.appendChild(mapWrapper);
+
+                const mapCanvas = await html2canvas(mapWrapper, { 
+                    scale: 4, 
+                    useCORS: true, 
+                    backgroundColor: null, 
+                    logging: false,
+                    onclone: (clonedDoc) => {
+                        const style = clonedDoc.createElement('style');
+                        style.innerHTML = `@import url('https://fonts.googleapis.com/css2?family=Prompt:wght@400;600;700;800;900&display=swap'); * { font-family: 'Prompt', sans-serif !important; }`;
+                        clonedDoc.head.appendChild(style);
+                    }
+                }); 
+                document.body.removeChild(mapWrapper);
+
+                // 3. โหลดรูปภาพพื้นหลัง Template
+                let bgImgSrc = "";
+                const uploadedImg = document.getElementById('template-preview-img');
+                if (uploadedImg && uploadedImg.src && uploadedImg.src.startsWith("data:")) {
+                    bgImgSrc = uploadedImg.src;
+                } else {
+                    // ถอด proxy ที่บีบอัดภาพออก เพื่อรักษาคุณภาพ 100%
+                    const proxies = [ 
+                        `https://api.allorigins.win/raw?url=${encodeURIComponent(DEFAULT_TEMPLATE_URL)}`, 
+                        `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(DEFAULT_TEMPLATE_URL)}` 
+                    ];
+                    for (let proxy of proxies) {
+                        try {
+                            const res = await fetch(proxy);
+                            if (res.ok) {
+                                const blob = await res.blob();
+                                bgImgSrc = await new Promise((res, rej) => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => res(reader.result);
+                                    reader.onerror = rej;
+                                    reader.readAsDataURL(blob); 
+                                });
+                                break;
+                            }
+                        } catch(e) {}
+                    }
+                    if (!bgImgSrc) bgImgSrc = DEFAULT_TEMPLATE_URL;
+                }
+
+                const bgImg = new Image();
+                bgImg.crossOrigin = "anonymous";
+                await new Promise((resolve, reject) => {
+                    bgImg.onload = resolve;
+                    bgImg.onerror = () => reject(new Error("โหลดกรอบรูปไม่ได้ กรุณาอัปโหลดใหม่ครับ"));
+                    bgImg.src = bgImgSrc;
+                });
+
+                // 4. นำมารวมกันบน Canvas โดยใช้ขนาด "ความละเอียดจริงของต้นฉบับ (Native Resolution)"
+                const baseW = 1080;
+                const baseH = 1350;
+                const finalCanvas = document.createElement('canvas');
+                
+                // ใช้ความกว้าง/ยาว ของกรอบรูปจริงๆ ทำให้ไม่ถูกลดทอนคุณภาพ 100%
+                finalCanvas.width = bgImg.naturalWidth || baseW;
+                finalCanvas.height = bgImg.naturalHeight || baseH;
+                
+                const ctx = finalCanvas.getContext('2d');
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+
+                // วาดพื้นหลังด้วยความละเอียดเต็มแม็กซ์
+                ctx.drawImage(bgImg, 0, 0, finalCanvas.width, finalCanvas.height);
+
+                // ปรับสเกลพิกัดทั้งหมดให้ขยายตามขนาดภาพจริง เพื่อให้ทุกอย่างยังคงอยู่ตำแหน่งเดิมเป๊ะ!
+                const scaleX = finalCanvas.width / baseW;
+                const scaleY = finalCanvas.height / baseH;
+                ctx.scale(scaleX, scaleY);
+
+                // วาดตัวอักษรวันที่ลงในเม็ดยาด้านซ้ายบน
+                ctx.textAlign = "center";
+                ctx.fillStyle = "#ffffff"; // เปลี่ยนเป็นสีขาว
+                ctx.font = "normal 800 28px 'Prompt', sans-serif"; // ย่อขนาดลง 2px (เป็น 28px)
+                
+                // เพิ่มเงาจางๆ ให้ตัวหนังสือ
+                ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetX = 1;
+                ctx.shadowOffsetY = 1;
+
+                // ลดระยะห่างบรรทัด (เดิม 260, 310) ขยับเข้าหากัน
+                ctx.fillText(shortDateForTemplate, 132, 271); // ขยับลงมา 1px (จาก 270 เป็น 271)
+                ctx.fillText(shortTimeForTemplate, 132, 303); // ขยับลงมา 1px (จาก 302 เป็น 303)
+                
+                // ล้างค่าเงาก่อนไปวาดส่วนอื่น
+                ctx.shadowColor = "transparent";
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+
+                // คำนวณวาดแผนที่ฝั่งซ้าย (กะตำแหน่งให้พอดีกรอบต้นฉบับ)
+                const targetMapW = 510; // ขยายแผนที่เพิ่ม 5px (จาก 505 เป็น 510)
+                const targetMapH = mapCanvas.height * (targetMapW / mapCanvas.width); 
+                ctx.drawImage(mapCanvas, 45, 290, targetMapW, targetMapH); // ขยับลงมา 1 Step (แกน Y จาก 280 เป็น 290)
+
+                // คำนวณวาดตารางฝั่งขวา (กะตำแหน่งให้พอดีกรอบต้นฉบับ)
+                const targetGridW = 420; // ขยายความกว้างเป็น 420
+                const targetGridH = gridCanvas.height * (targetGridW / gridCanvas.width); 
+                ctx.drawImage(gridCanvas, 582, 205, targetGridW, targetGridH); // ขยับตารางลงมา แกน Y เป็น 205
+
+                // 5. บันทึกรูปอัตโนมัติ
+                const link = document.createElement("a");
+                // เปลี่ยนจาก JPEG เป็น PNG เพื่อรักษารายละเอียดของ Template ให้ชัด 100% (Lossless)
+                link.href = finalCanvas.toDataURL("image/png"); 
+                let fileDate = (shortDateForTemplate + shortTimeForTemplate).replace(/[\s\.]/g, '_').replace(/:/g, '');
+                link.download = `PM25_17_North_${fileDate}.png`;
+                link.click();
+
+                if (bgImgSrc.startsWith('blob:') || bgImgSrc.startsWith('data:')) URL.revokeObjectURL(bgImgSrc);
+
+            } catch (err) {
+                console.error("Save Error:", err);
+                alert("เกิดข้อผิดพลาด: " + err.message);
+            } finally {
+                btnElement.innerHTML = originalText;
+                btnElement.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
